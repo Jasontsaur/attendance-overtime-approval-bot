@@ -93,7 +93,7 @@ npx playwright install --with-deps chromium
 ```bash
 node check-queues.js
 ```
-
+這個js 透過playwright 存取瀏覽器DOM，完成LLM交辦的任務，並且回報給LLM。
 登入已存的 session、依序檢查三個佇列，並且**在回傳結果前就已經執行完**
 標準政策的核准動作（不是預演/dry run）——確切政策內容見
 [`SKILL.md`](SKILL.md)。會先印出人類可讀的過程紀錄，最後一行印出

@@ -30,6 +30,14 @@ function loadExtraApproveNames() {
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+// Same idea as loadExtraApproveNames() but for 假單簽核, which has no
+// whitelist at all — every approval there requires this explicit per-run
+// name list. Usage: EXTRA_APPROVE_LEAVE_NAMES="某某人" node check-queues.js
+function loadExtraApproveLeaveNames() {
+  const raw = process.env.EXTRA_APPROVE_LEAVE_NAMES || '';
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 function loadWhitelist() {
   const text = fs.readFileSync(WHITELIST_PATH, 'utf8');
   const names = [];
@@ -182,18 +190,37 @@ async function main() {
     result.queues.overtime = q;
   }
 
-  // ---- 3. 假單簽核: check-only ----
+  // ---- 3. 假單簽核: check-only by default, no whitelist. Only approves a
+  // row if its name is explicitly passed via EXTRA_APPROVE_LEAVE_NAMES for
+  // this run (separate from EXTRA_APPROVE_NAMES, which is overtime-only) —
+  // per standing policy this queue never auto-approves on its own.
   {
     const label = '假單簽核';
     console.log(`\n=== ${label} ===`);
     const frame = await gotoQueue(page, label);
     const parsed = await readQueueTable(frame);
-    const q = { pending: [], action: 'check_only' };
+    const q = { pending: [], approved: [], stillPending: [], action: 'check_only' };
     if (!parsed || parsed.dataRows.length === 0) {
       console.log('empty queue');
     } else {
+      const extraApprove = loadExtraApproveLeaveNames();
       q.pending = parsed.dataRows.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
       console.log(`${parsed.dataRows.length} pending row(s):`, JSON.stringify(q.pending));
+      if (extraApprove.length > 0) console.log('extra one-off approve names:', extraApprove);
+      const toApprove = parsed.dataRows.filter((r) => extraApprove.includes(r.name));
+      const toLeave = parsed.dataRows.filter((r) => !extraApprove.includes(r.name));
+      q.stillPending = toLeave.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
+      if (toApprove.length > 0) {
+        for (const row of toApprove) {
+          await clickSignRadio(row.rowLocator);
+        }
+        const dialogMsg = await saveAndConfirm(frame, page);
+        q.action = 'explicitly_approved_subset';
+        q.approved = toApprove.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
+        q.dialogMessage = dialogMsg;
+        console.log('explicitly approved:', JSON.stringify(q.approved));
+      }
+      console.log('still pending (check-only):', JSON.stringify(q.stillPending));
     }
     result.queues.leave = q;
   }

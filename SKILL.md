@@ -1,266 +1,238 @@
 ---
 name: attendance-overtime-approval-bot
-description: This skill should be used when the user asks to approve, sign off, or batch-approve pending overtime requests ("加班單簽核", "簽核加班單", "核准加班", "approve overtime forms") in a classic-ASP attendance system via the browser. Template/example skill — fill in your own organization's URL (see `ATTENDANCE_BASE_URL` below) and whitelist before use.
+description: 當使用者要求核准、簽核、批量核准差勤系統中待簽的加班申請（「加班單簽核」、「簽核加班單」、「核准加班」、approve overtime forms）時使用此 skill，透過瀏覽器操作一套 classic-ASP 差勤系統。這是範本/範例 skill——使用前請先填入你自己組織的網址（見下方 `ATTENDANCE_BASE_URL`）與白名單。
 version: 2.0.0
 ---
 
 # 差勤系統 - 加班單批量簽核
 
-Checks the "預定加班單簽核" / "加班單簽核" / "假單簽核" lists in your
-organization's classic-ASP attendance system and approves pending rows per
-the standing policy below, then reports results.
+檢查你組織的 classic-ASP 差勤系統中「預定加班單簽核」/「加班單簽核」/
+「假單簽核」三個清單，依下方標準政策核准待簽項目，然後回報結果。
 
-This was built against one specific company's internal attendance system
-(URLs/company name scrubbed for this public template — see "Adapting this
-to your own system" below), so the page structure, column layout, and Chinese
-UI strings in this skill are tailored to that system. Treat it as a worked
-example of the approach (Playwright DOM automation instead of screenshots)
-rather than something that works unmodified against a different system.
+這套 skill 原本是針對某一家公司內部的差勤系統開發的（公開這份範本時已經
+把網址/公司名稱去識別化——見下方「套用到你自己的系統」），所以裡面的頁面
+結構知識、欄位配置、以及中文介面字串都是針對那套系統寫死的。請把這個 repo
+當成一個完整的做法範例（用 Playwright 直接操作 DOM，取代截圖）來參考，而
+不是一套不用修改就能套用到別的系統上的成品。
 
-**Primary method: Playwright**, driving a headless Chromium running inside
-WSL (see `playwright/`), reading the DOM directly — no screenshots, no
-vision tokens, no pixel coordinates. Falls back to Windows mouse-simulation
-+ browser bookmarklets (see "Fallback procedure" below) only if Playwright
-or the saved login session is unavailable.
+**主要做法：Playwright**，在 WSL 裡跑一個 headless Chromium（見
+`playwright/`），直接讀取 DOM——不用截圖、不耗費視覺 token、不用抓像素
+座標。只有在 Playwright 或已存的登入 session 無法使用時，才會退回用
+Windows 滑鼠模擬 + 瀏覽器 bookmarklet（見下方「備援流程」）。
 
-## Adapting this to your own system
+## 套用到你自己的系統
 
-1. Copy `白名單.md.example` → `白名單.md` and fill in real names (gitignored,
-   never committed).
-2. Set `ATTENDANCE_BASE_URL` (and `ATTENDANCE_DOMAIN` for the cookie-based
-   session refresh path) to your system's URL — see `playwright/*.js` for
-   where these are read, and `README.md` for the full env var list.
-3. The DOM selectors in `check-queues.js` (frame names `header`/`main`,
-   table headers `姓名`/`工號`, button text `存檔`, the confirm-dialog
-   message match) are specific to the classic-ASP frameset structure this
-   was built against — re-run `playwright/probe.js` / `probe2.js` style
-   exploration against your own system and adjust accordingly.
+1. 把 `白名單.md.example` 複製成 `白名單.md`，填入真實姓名（已加入
+   .gitignore，不會被 commit）。
+2. 把 `ATTENDANCE_BASE_URL`（以及走 cookie 復原 session 那條路徑要用的
+   `ATTENDANCE_DOMAIN`）設成你系統的網址——這些變數在哪裡被讀取見
+   `playwright/*.js`，完整環境變數清單見 `README.md`。
+3. `check-queues.js` 裡的 DOM 選擇器（frame 名稱 `header`/`main`、表格
+   欄位 `姓名`/`工號`、按鈕文字 `存檔`、confirm 對話框的文字比對）是針對
+   當初開發時那套 classic-ASP frameset 結構寫的——請對你自己的系統重新跑
+   一次類似 `playwright/probe.js` / `probe2.js` 的探索流程，再依實際狀況
+   調整。
 
-## Standing policy (set by the user, applies to every run)
+## 標準政策（由使用者設定，每次執行都適用）
 
-- **預定加班單簽核**: auto-approve all pending rows directly, with no
-  per-run confirmation needed.
-- **夜點津貼簽核** and **異常簽核**: skip these two queues entirely — do not
-  check or report on them anymore.
-- **假單簽核**: still check-only. List pending rows to the user; do not
-  approve without the user's separate explicit authorization in that turn.
-- **加班單簽核** (post-hoc): check every row's 姓名 against
-  `白名單.md` (same directory as this file). Auto-approve rows whose
-  requester is on the whitelist, with no per-run confirmation. Rows for
-  anyone NOT on the whitelist remain check-only: list them to the user and
-  wait for separate explicit authorization before approving. Report which
-  rows were auto-approved (whitelist match) vs. which are still pending
-  confirmation.
-- **Every report to the user must include the current time** (e.g. `date`).
-  This applies to every check result, whether pending items were found or
-  not — including "目前無待簽差勤" replies.
+- **預定加班單簽核**：所有待簽項目直接自動核准，不需要每次都徵求確認。
+- **夜點津貼簽核**和**異常簽核**：這兩個佇列完全跳過——不再檢查也不回報。
+- **假單簽核**：仍然僅供查看。把待簽項目列給使用者看；沒有使用者在該次
+  對話裡另外明確授權，不得核准。
+- **加班單簽核**（事後加班）：把每一列的姓名拿去比對 `白名單.md`（跟這個
+  檔案同一個目錄）。申請人在白名單上的項目直接自動核准，不需要每次確認。
+  不在白名單上的項目維持僅供查看：列給使用者看，等待另外明確授權才能核准。
+  回報時要區分哪些是白名單自動核准、哪些還在等待確認。
+- **每次回報給使用者都必須包含目前時間**（例如用 `date`）。不論有沒有找到
+  待簽項目都適用——包括「目前無待簽差勤」這類回覆。
 
-## Before doing anything (for lists other than 預定加班單簽核)
+## 動手之前（適用於「預定加班單簽核」以外的清單）
 
-This performs a real, hard-to-reverse HR/payroll action (approving someone's
-overtime/leave). For any list not covered by the standing policy above,
-confirm before approving, unless the user has already stated it in the
-current request:
+這會執行真實、難以復原的人資/薪資相關動作（核准他人的加班/請假）。對於
+標準政策沒有涵蓋到的清單，除非使用者在當次請求裡已經講清楚，否則核准前
+要先確認：
 
-1. **Which list**?
-2. **Review or blind-approve** — does the user want the pending rows listed
-   for confirmation first, or approve all without reviewing content?
+1. **是哪個清單**？
+2. **要先列出來給使用者確認，還是直接核准全部**——使用者是想先看待簽項目
+   內容再確認，還是不用檢視內容直接全部核准？
 
-Do not assume "approve all" carries over to lists outside the standing
-policy — ask again unless the current message already says so explicitly.
+不要假設「全部核准」這個指示可以套用到標準政策以外的清單——除非當次訊息
+已經明確講清楚，否則要重新確認一次。
 
-The point where authorization matters shifted with the Playwright rewrite:
-there's no per-click classifier gate anymore (see "Why Playwright" below),
-so **running `check-queues.js` at all** is the authorization checkpoint —
-only run it when the user's current message matches an already-established
-trigger (e.g. "執行 attendance-overtime-approval-bot skill..."), not on a
-timer or autonomously without a user-initiated ask in that turn.
+改用 Playwright 之後，「授權真正發生作用的那個點」也跟著改變了：不再有
+針對個別 DOM 點擊的 classifier 把關機制了（見下方「為什麼用 Playwright」）
+，所以**執行 `check-queues.js` 這個動作本身**就是授權檢查點——只有在
+使用者當次訊息確實對應到已經講好的觸發條件時才執行（例如「執行
+attendance-overtime-approval-bot skill...」），不能定時執行，也不能在
+沒有使用者當次主動要求的情況下自主執行。
 
-## Procedure (Playwright — primary)
+## 執行流程（Playwright — 主要方法）
 
-All commands run from `playwright/` (relative to this file).
+所有指令都從 `playwright/`（相對於這個檔案的路徑）底下執行。
 
-1. **Run the check**:
+1. **執行檢查**：
    ```
    cd playwright && node check-queues.js
    ```
-   This single script does everything: logs into the saved session, visits
-   all three queues, reads pending rows via DOM (no screenshots), and
-   *already performs* the standing-policy approvals (預定加班單簽核 auto,
-   加班單簽核 whitelist subset) before it returns — this is not a dry run.
-   It prints a human-readable log, then a final `RESULT_JSON:{...}` line.
-   Parse that JSON line for the structured result; use the log lines above
-   it only for extra debugging color.
+   這一個腳本會做完所有事：登入已存的 session、依序造訪三個佇列、透過
+   DOM 讀取待簽項目（不用截圖），並且**在回傳結果前就已經執行完**標準
+   政策的核准動作（預定加班單簽核全部自動核准、加班單簽核核准白名單子集）
+   ——這不是預演/dry run。會先印出人類可讀的過程紀錄，最後印出一行
+   `RESULT_JSON:{...}`。要解析這最後一行 JSON 拿結構化結果；前面的過程
+   紀錄只是輔助除錯用，不用照著解析。
 
-2. **If `RESULT_JSON` contains `"error":"SESSION_EXPIRED"` or the script
-   throws**: the saved login session (`playwright/auth/storage_state.json`)
-   is no longer valid. See "Session refresh" below — do not fall back to
-   mouse-simulation just because of this; refreshing the session is usually
-   faster.
+2. **如果 `RESULT_JSON` 裡出現 `"error":"SESSION_EXPIRED"`，或腳本直接
+   拋出例外**：代表已存的登入 session（`playwright/auth/storage_state.json`）
+   失效了。處理方式見下方「Session refresh」——不要因為這個原因就退回用
+   滑鼠模擬；重新整理 session 通常比較快。
 
-3. **Report to the user** per the standing policy, from the JSON: which
-   queue had how many pending rows, which were auto-approved (name/id/date/
-   time/事由), which are still awaiting the user's explicit go-ahead
-   (假單簽核 rows, and non-whitelist 加班單簽核 rows), and the current time.
+3. **依標準政策回報給使用者**，內容取自 JSON：哪個佇列有幾筆待簽、哪些
+   已經自動核准（姓名/工號/日期/時間/事由）、哪些還在等使用者明確授權
+   （假單簽核的項目、以及不在白名單上的加班單簽核項目），以及目前時間。
 
-4. **Optional sanity screenshot** — for the first live run after any code
-   change to `check-queues.js`'s approve path (radio-checking / 存檔 /
-   confirm-dialog logic), or any run where something felt off, it's fine to
-   take one `scripts/screenshot.sh` afterward to visually confirm the queue
-   is now empty / rows disappeared as expected. Not required once that path
-   is trusted again — the script's own JSON result should already reflect
-   what happened.
+4. **選擇性的安全檢查截圖**——如果剛改過 `check-queues.js` 的核准邏輯
+   （勾選 radio / 存檔 / confirm 對話框那段），第一次在正式環境跑，或是
+   任何一次執行感覺怪怪的，可以事後補一張 `scripts/screenshot.sh` 截圖，
+   目視確認佇列真的清空/項目真的消失了。等這條路徑重新被信任之後就不需要
+   ——腳本自己回傳的 JSON 結果應該已經反映實際發生的事。
 
-## Session refresh (when storage_state.json expires)
+## Session 重新整理（storage_state.json 失效時）
 
-Two ways to get a fresh `playwright/auth/storage_state.json`, in order of
-preference:
+依推薦順序，有兩種方式可以拿到新的 `playwright/auth/storage_state.json`：
 
-**A. Extract cookies from the user's already-logged-in Edge** (fast, no
-typing required) — **but this reads live session credentials out of the
-user's browser, so treat it like any other irreversible/sensitive action:
-explain what you're about to do and get the user's explicit go-ahead in
-that turn before doing it**, same as the safety-gate spirit below.
-1. Confirm the attendance-system tab in the user's Edge is actually logged
-   in (`scripts/screenshot.sh` and look for the 工號/姓名 box top-left, not
-   a login form).
-2. Add/edit a favorites-bar bookmark (via `edge://favorites/` → 新增我的最愛
-   — typing into that dialog's URL field is not blocked by the omnibox's
-   paste-strips-`javascript:` protection the way pasting directly into the
-   address bar is) whose URL is:
+**A. 從使用者已登入的 Edge 擷取 cookie**（快，不用打字輸入）——**但這個
+方式會從使用者的瀏覽器讀出真實的 session 憑證，要當成任何其他不可逆/
+敏感動作一樣處理：動手之前先說明你要做什麼，並在該次對話裡取得使用者
+明確同意**，跟下方安全機制的精神一樣。
+1. 確認使用者 Edge 裡的差勤系統分頁確實是登入狀態（`scripts/screenshot.sh`
+   看左上角有沒有工號/姓名的框，而不是登入表單）。
+2. 在收藏列新增/編輯一個書籤（透過 `edge://favorites/` → 新增我的最愛
+   ——在這個對話框的 URL 欄位打字輸入，不會被網址列「貼上時會被去除
+   `javascript:` 前綴」的防護機制擋下來，跟直接貼到網址列不一樣），URL
+   內容是：
    ```
    javascript:(function(){navigator.clipboard.writeText(document.cookie).then(function(){document.title='COOKIE_COPIED◆';},function(err){document.title='COPY_FAIL:'+err+'◆';});})();
    ```
-3. Click that bookmark on the attendance-system tab, confirm via `scripts/get-title.sh`
-   that the title became `COOKIE_COPIED◆`, then read the cookie string with
-   `scripts/get-clipboard.sh` (NOT get-title.sh — the cookie string is too
-   long for the window-title buffer and will be silently truncated).
-4. `cd playwright && node build-storage-state-from-cookie.js '<cookie string>'`
+3. 在差勤系統的分頁點擊這個書籤，用 `scripts/get-title.sh` 確認標題變成
+   `COOKIE_COPIED◆`，再用 `scripts/get-clipboard.sh` 讀取 cookie 字串
+   （不要用 get-title.sh——cookie 字串通常太長，會被視窗標題的緩衝區
+   靜默截斷）。
+4. `cd playwright && node build-storage-state-from-cookie.js '<cookie 字串>'`
 
-**B. Full interactive login** (`playwright/login-once.js`) — needed if (A)
-fails (e.g. Edge session also expired) or the user prefers it:
-1. Run `node login-once.js` in the background — it launches a *visible*
-   Chromium (via WSLg, shows on the Windows desktop) and waits up to 5
-   minutes.
-2. Tell the user to interact with that window and log in by hand — this
-   needs actual keyboard/mouse input into a GUI window, so the user must be
-   physically at the machine or connected via RDP/remote-desktop from
-   elsewhere. A "!" chat command cannot do this (no TTY/GUI access), and
-   neither can Claude.
-3. Once the user logs in, the script auto-detects the navigation to
-   `mainback.asp`, saves `storage_state.json`, and exits on its own — no
-   further action needed from Claude.
-4. If the user says they can't do this right now (away from the machine, no
-   RDP available), don't block on it — fall back to (A) if the existing
-   Edge session is still alive, or tell the user clearly what's blocked and
-   wait.
+**B. 完整互動式登入**（`playwright/login-once.js`）——當方法 A 失敗
+（例如 Edge 的 session 也過期了）或使用者偏好這個方式時使用：
+1. 在背景執行 `node login-once.js`——會開一個*看得到*的 Chromium 視窗
+   （透過 WSLg 顯示在 Windows 桌面上），最長等待 5 分鐘。
+2. 告訴使用者去跟那個視窗互動、手動登入——這需要真正的鍵盤/滑鼠輸入到
+   一個 GUI 視窗，所以使用者必須人在電腦前，或是透過 RDP/遠端桌面連進來。
+   聊天視窗裡的「!」指令做不到這件事（沒有 TTY/GUI 存取權），Claude 自己
+   也做不到。
+3. 使用者登入後，腳本會自動偵測到跳轉到 `mainback.asp`，自動存檔
+   `storage_state.json`，然後自己結束——不需要 Claude 再做任何事。
+4. 如果使用者說現在沒辦法做這件事（不在電腦前、也沒有 RDP 可用），不要
+   卡在這裡等——如果既有的 Edge session 還活著就改用方法 A，或是清楚
+   告訴使用者現在卡在哪裡、然後等待。
 
-## Why Playwright, and what changed from the old mouse-sim approach
+## 為什麼用 Playwright，跟舊版滑鼠模擬做法比起來改了什麼
 
-There's no DOM-level browser automation from *Windows Edge* available in
-this environment, so instead this skill runs its own separate, independent
-Chromium **inside WSL** (via `playwright/`), authenticated with a copy of
-the session cookie rather than a fresh interactive login every time. This
-never touches the user's actual Edge window — no relaunching it, no closing
-their other tabs, no CDP debug-port exposure.
+這個環境裡沒辦法直接對*使用者的 Windows Edge*做 DOM 層級的自動化操作，
+所以這個 skill 改成在 **WSL 裡面**跑自己獨立的 Chromium（透過
+`playwright/`），用複製出來的 session cookie 認證，而不是每次都重新互動
+登入。這個做法完全不會碰到使用者實際在用的 Edge 視窗——不會重開它、不會
+關掉它其他的分頁、也不會暴露 CDP debug port。
 
-Chromium's shared libraries (`libnspr4`, `libnss3`, `libasound2t64`,
-`libasound2-data`) aren't installed system-wide on this WSL distro and there
-is no interactive sudo in this session to `apt install` them. They were
-obtained without root via `apt-get download` + `dpkg-deb -x` into
-`playwright/localdeps/` (see that dir's README), and `playwright/env.js`
-points `LD_LIBRARY_PATH` there. If a future session *does* have sudo, a
-proper `npx playwright install-deps chromium` makes `localdeps/`
-unnecessary (but it's harmless to leave in place).
+Chromium 需要的共用函式庫（`libnspr4`、`libnss3`、`libasound2t64`、
+`libasound2-data`）在這套 WSL 發行版上沒有系統層級安裝好，而且這個 session
+裡也沒有互動式 sudo 權限可以 `apt install`。這些函式庫是在沒有 root 權限
+的情況下，用 `apt-get download` + `dpkg-deb -x` 取得，放在
+`playwright/localdeps/`（細節見那個目錄下的 README），`playwright/env.js`
+會把 `LD_LIBRARY_PATH` 指過去。如果之後哪次執行環境有 sudo 權限，直接跑
+正規的 `npx playwright install-deps chromium` 就能讓 `localdeps/` 變得
+不必要（但留著也沒關係，不會有影響）。
 
-**Irreversibility still applies.** check-queues.js performs real
-approvals — there's no Claude Code classifier gate on individual DOM clicks
-the way there was on individual mouse-simulation clicks, so the discipline
-that gate used to enforce now has to come from *when this script gets run*:
-only on a current, explicit user trigger matching the standing policy (see
-"Before doing anything" above), never speculatively or on a schedule
-without a fresh ask.
+**不可逆性的考量依然存在。** check-queues.js 會執行真實的核准動作——不再
+像過去針對個別滑鼠模擬點擊那樣，有 Claude Code 的 classifier 把關個別
+DOM 點擊了，所以原本那個把關機制該負責的紀律，現在得靠「*這個腳本什麼時候
+被執行*」來把關：只能在使用者當次訊息確實對應到標準政策裡講好的觸發條件時
+執行（見上方「動手之前」），不能憑空推測，也不能在沒有使用者當次主動要求
+的情況下按排程自主執行。
 
-## Fallback procedure (mouse-simulation + bookmarklets)
+## 備援流程（滑鼠模擬 + bookmarklet）
 
-Use this only if Playwright is broken, `storage_state.json` can't be
-refreshed by either method above, or the user explicitly asks for the old
-approach. This drives the actual Windows Edge via PowerShell mouse
-simulation from WSL (`scripts/click.sh`, `scripts/send-keys.sh`, etc.) and
-depends on two saved favorites-bar bookmarklets, "讀取清單" and "自動簽核"
-(top-level on the bar, not inside a folder).
+只有在 Playwright 壞掉、`storage_state.json` 用上面兩種方法都無法重新
+整理、或使用者明確要求用舊做法時才用這個。這個做法會透過 WSL 用
+PowerShell 模擬滑鼠操作使用者實際的 Windows Edge（`scripts/click.sh`、
+`scripts/send-keys.sh` 等），並且依賴兩個存在收藏列上的 bookmarklet：
+「讀取清單」和「自動簽核」（要直接放在收藏列最上層，不能放在資料夾裡面）。
 
-### Safety gate
+### 安全機制
 
-Claude Code's auto-mode classifier may block the first click attempt
-because it's an irreversible action on a production system — this is
-expected, not a bug. If blocked:
+Claude Code 的 auto-mode classifier 可能會擋下第一次點擊的嘗試，因為這是
+對正式環境系統執行的不可逆動作——這是預期行為，不是 bug。如果被擋下：
 
-- Do **not** try to work around it via another tool.
-- Tell the user exactly what click/action was blocked and why.
-- Only retry after the user explicitly authorizes it in that turn.
+- **不要**試圖用別的工具繞過去。
+- 明確告訴使用者哪個點擊/動作被擋下、為什麼被擋下。
+- 只有在使用者當次對話裡明確授權後才能重試。
 
-### Coordinates are NOT stable — always re-derive them from a fresh screenshot
+### 座標不是固定的——每次都要從最新的截圖重新計算
 
-Window position, tab count, and screen resolution can differ between runs.
-Never hardcode pixel coordinates from a past run. Every run must screenshot
-first, read the image, and compute row/button coordinates from what's
-actually on screen this time.
+視窗位置、分頁數量、螢幕解析度每次執行時都可能不一樣。絕對不要沿用過去
+執行時寫死的像素座標。每次執行都必須先截圖、讀圖，再依這次畫面上實際的
+內容計算出列/按鈕的座標。
 
-### Steps
+### 步驟
 
-1. **Minimize anything covering the browser**: `scripts/minimize-terminal.sh`
+1. **把擋住瀏覽器的東西縮到最小**：`scripts/minimize-terminal.sh`
 
-2. **Screenshot and find the browser tab** for your attendance system. If
-   not open: `powershell.exe -NoProfile -Command "Start-Process
-   '<your-attendance-system-url>/mainback.asp'"`, then click **預定加班單簽核**
-   / **加班單簽核** / **假單簽核** in the left sidebar (locate coordinates
-   from the screenshot each time), screenshot again to confirm.
+2. **截圖找出你的差勤系統的瀏覽器分頁**。如果沒開：
+   `powershell.exe -NoProfile -Command "Start-Process
+   '<你的差勤系統網址>/mainback.asp'"`，接著在左側選單點擊**預定加班單
+   簽核** / **加班單簽核** / **假單簽核**（每次都要從當次截圖重新定位
+   座標），再截圖一次確認頁面已載入。
 
-3. **Check whether the queue has pending rows without a screenshot**: show
-   the favorites bar if needed (`scripts/send-keys.sh '^+b'`), click **讀取清單**
-   directly on the bar, read the result with `scripts/get-title.sh`:
-   - `LIST:NOHEADER◆...` or `LIST:EMPTY◆...` → empty, nothing to do, move on.
-   - `LIST:<N>:<name1>,<id1>|...◆...` → N pending rows with 姓名,工號.
-     Enough for the whitelist check or to report names, but not full detail
-     (dates/times/事由/時數) or click coordinates — proceed to step 4 for
-     that.
-   - Anything else (stale text, empty, window not focused) → don't guess,
-     screenshot instead.
+3. **不用截圖先確認佇列有沒有待簽項目**：如果收藏列沒顯示就先顯示出來
+   （`scripts/send-keys.sh '^+b'`），直接點擊收藏列上的**讀取清單**，用
+   `scripts/get-title.sh` 讀取結果：
+   - `LIST:NOHEADER◆...` 或 `LIST:EMPTY◆...` → 是空的，不用做任何事，
+     繼續下一個佇列。
+   - `LIST:<N>:<name1>,<id1>|...◆...` → N 筆待簽項目，含姓名、工號。足夠
+     用來做白名單比對，或回報姓名，但沒有完整細節（日期/時間/事由/時數）
+     也沒有點擊座標——這些要進到步驟 4 才拿得到。
+   - 其他任何情況（殘留文字、空白、視窗沒有 focus）→ 不要用猜的，改用
+     截圖確認。
 
-4. **If there are pending rows, screenshot to read full detail.** Columns
-   left to right: 簽核 (radio), 駁回 (radio), 姓名, 工號, 起始日期, 起始時間,
-   截止日期, 截止時間, 事由, 已申請加班時數. Report rows to the user first
-   if they asked to review; wait for confirmation before continuing.
+4. **如果有待簽項目，截圖讀取完整細節。** 欄位由左到右依序是：簽核
+   （radio）、駁回（radio）、姓名、工號、起始日期、起始時間、截止日期、
+   截止時間、事由、已申請加班時數。如果使用者要求先看過再核准，先把項目
+   列給使用者看，等待確認才能繼續。
 
-5. **Select every 簽核 radio and submit**:
-   - **預定加班單簽核**: click **自動簽核** directly on the favorites bar —
-     selects all 簽核 radios and submits immediately (no separate 存檔/確定
-     click needed, skip to step 8).
-   - Otherwise: click the 簽核 radio for each row to approve via
-     `scripts/click.sh <x> <row_y>` (rows ~24-25px apart, radio in the first
-     column).
+5. **勾選每一列的簽核 radio 並送出**：
+   - **預定加班單簽核**：直接點擊收藏列上的**自動簽核**——會選取當前
+     清單裡所有的簽核 radio 並立刻送出表單（不需要再另外點存檔/確定，
+     直接跳到步驟 8 驗證結果）。
+   - 其他情況：對每一列要核准的項目用
+     `scripts/click.sh <x> <row_y>` 點擊簽核 radio（每列間距約
+     24-25px，radio 在表格第一欄）。
 
-6. **Screenshot again and verify** every intended row shows 簽核 filled (●)
-   before saving; re-click any that didn't take.
+6. **再截圖一次確認**每一列要核准的項目都已經顯示簽核勾選狀態（●）才
+   存檔；沒生效的重新點一次。
 
-7. **Click 存檔** (`scripts/click.sh <save_x> <save_y>`), then a native
-   confirm dialog appears ("是否確定將勾選的資料存檔..??") — screenshot to
-   locate **確定** and click it.
+7. **點擊存檔**（`scripts/click.sh <save_x> <save_y>`），接著會跳出原生
+   confirm 對話框（「是否確定將勾選的資料存檔..??」）——截圖找到**確定**
+   按鈕位置並點擊。
 
-8. **Screenshot once more to verify success** — table should now be empty
-   with no error banner. Report which rows were approved.
+8. **再截圖一次確認成功**——表格現在應該是空的，也沒有錯誤訊息。把核准
+   了哪些項目回報給使用者。
 
-### Failure modes
+### 需要留意的失敗情況
 
-- Click landed wrong (table shifted, extra row appeared) → re-screenshot,
-  don't keep clicking blind based on stale coordinates.
-- Confirm dialog didn't appear after 存檔 → screenshot to check for a
-  validation error instead.
-- Session appears logged out (redirected to login page) → this is the
-  regular idle-timeout case, not a failure: click **回主頁**, the 登入 form
-  reappears with 工號/密碼 already autofilled by Edge's saved credentials —
-  click **登入** and continue. Don't stop and ask for this specific case.
-- "讀取清單" / "自動簽核" bookmarklet not found on the bar (profile changed,
-  bookmark moved/deleted) → fall back to screenshot / manual radio clicking,
-  don't spend time recreating the bookmark mid-run.
+- 點擊點錯位置（表格位移、多了一列）→ 重新截圖，不要憑舊座標繼續盲目
+  點擊。
+- 點了存檔之後 confirm 對話框沒有跳出來 → 截圖確認是不是跳出了驗證錯誤
+  訊息。
+- session 看起來被登出了（被導回登入頁）→ 這是正常的閒置逾時情況，不算
+  失敗：點擊**回主頁**，登入表單會重新出現，工號/密碼已經被 Edge 存的
+  帳密自動帶入——點擊**登入**繼續即可。這種情況不用停下來問使用者。
+- 「讀取清單」/「自動簽核」書籤在收藏列上找不到（設定檔換了、書籤被
+  移動或刪除）→ 退回用截圖/手動點擊 radio 的方式，不要花時間在執行過程
+  中重新建立書籤。

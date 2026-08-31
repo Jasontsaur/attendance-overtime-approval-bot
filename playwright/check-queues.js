@@ -8,7 +8,10 @@
 // build-storage-state-from-cookie.js). Prints a human-readable log, then a
 // single line `RESULT_JSON:{...}` at the end with the structured summary —
 // the caller should parse that last line rather than screen-scraping the
-// log.
+// log. Every run also appends one row per pending item (plus a summary row
+// for empty queues) to ../logs/approval-log-YYYY-MM.csv, filed by each
+// row's own event date (not the check-run date) — a local-only audit
+// trail, gitignored, never synced anywhere.
 require('./env.js');
 const fs = require('fs');
 const path = require('path');
@@ -20,6 +23,114 @@ const WHITELIST_PATH = path.join(__dirname, '..', '白名單.md');
 // `ATTENDANCE_BASE_URL=https://attendance.example.com node check-queues.js`.
 const BASE_URL = process.env.ATTENDANCE_BASE_URL || 'https://YOUR-ATTENDANCE-SYSTEM.example.com';
 const MAINBACK_URL = `${BASE_URL}/mainback.asp`;
+const LOG_DIR = path.join(__dirname, '..', 'logs');
+const LOG_HEADER = 'timestamp,queue,status,action,name,id,detail';
+
+const QUEUE_LABELS = {
+  pre_overtime: '預定加班單簽核',
+  overtime: '加班單簽核',
+  leave: '假單簽核',
+  abnormal: '異常簽核',
+};
+
+// Column index (within a row's `detail` array) holding the event's own
+// date, per queue — used to file each row under the month it actually
+// happened in, not the month it was checked/approved in. Confirmed via
+// live data against one specific system: pre_overtime uses 起始日期
+// (Gregorian YYYYMMDD), overtime/leave use their 起始日期 (Minguo/ROC
+// YYYMMDD, e.g. "1150829" = 2026-08-29). Re-verify these indices against
+// your own system's column layout.
+const EVENT_DATE_FIELD_INDEX = {
+  pre_overtime: 4,
+  overtime: 4,
+  leave: 5,
+};
+
+function csvField(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function logPathFor(yearMonth) {
+  return path.join(LOG_DIR, `approval-log-${yearMonth}.csv`);
+}
+
+// Parses an 8-digit Gregorian (YYYYMMDD) or 7-digit Minguo/ROC (YYYMMDD)
+// date string into a "YYYY-MM" key. Returns null if it doesn't look like
+// either (e.g. it's actually an hour total or an ID, not a date).
+function parseDateToYearMonth(str) {
+  if (!/^\d{7,8}$/.test(str)) return null;
+  const month = str.length === 8 ? str.slice(4, 6) : str.slice(3, 5);
+  if (month < '01' || month > '12') return null;
+  const year = str.length === 8 ? parseInt(str.slice(0, 4), 10) : parseInt(str.slice(0, 3), 10) + 1911;
+  if (year < 1990 || year > 2100) return null;
+  return `${year}-${month}`;
+}
+
+// Looks up the known date column for this queue first; falls back to
+// scanning every field (for queues with an unconfirmed layout, e.g.
+// 異常簽核) or if that column didn't parse. Falls back to the check-run's
+// own month as a last resort so a row is never silently dropped.
+function extractEventYearMonth(queueKey, texts, fallbackYearMonth) {
+  const idx = EVENT_DATE_FIELD_INDEX[queueKey];
+  if (idx !== undefined && texts[idx]) {
+    const ym = parseDateToYearMonth(texts[idx]);
+    if (ym) return ym;
+  }
+  for (const t of texts) {
+    const ym = parseDateToYearMonth(t);
+    if (ym) return ym;
+  }
+  return fallbackYearMonth;
+}
+
+// Appends one row per pending item (plus one summary row for empty queues)
+// to a local CSV audit log — every run, whether or not anything was
+// approved. Rows are filed into logs/approval-log-YYYY-MM.csv by the
+// event's own date (an approval checked in September for an August
+// overtime request lands in the August file); "empty queue" summary rows
+// have no event date, so they're filed under the check run's own month.
+// Local-only; never synced anywhere.
+function appendLogRows(result) {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+  const runYearMonth = result.timestamp.slice(0, 7); // "2026-08-31T07:01:37.059Z" -> "2026-08"
+  const linesByMonth = new Map();
+  const pushLine = (yearMonth, fields) => {
+    if (!linesByMonth.has(yearMonth)) linesByMonth.set(yearMonth, []);
+    linesByMonth.get(yearMonth).push(fields.map(csvField).join(','));
+  };
+
+  const approvedKeyOf = (r) => `${r.name}|${r.id}|${JSON.stringify(r.detail)}`;
+
+  for (const [queueKey, q] of Object.entries(result.queues)) {
+    const label = QUEUE_LABELS[queueKey] || queueKey;
+    const action = q.action || '';
+    const pending = q.pending || [];
+    if (pending.length === 0) {
+      pushLine(runYearMonth, [result.timestamp, label, 'empty', action, '', '', '']);
+      continue;
+    }
+    const approvedKeys = new Set((q.approved || []).map(approvedKeyOf));
+    for (const row of pending) {
+      let status;
+      if (q.action === 'check_only' && !q.approved) {
+        status = 'reported'; // 異常簽核: report-only, no approve/pending split at all
+      } else {
+        status = approvedKeys.has(approvedKeyOf(row)) ? 'approved' : 'still_pending';
+      }
+      const eventYearMonth = extractEventYearMonth(queueKey, row.detail || [], runYearMonth);
+      const detail = (row.detail || []).join(' | ');
+      pushLine(eventYearMonth, [result.timestamp, label, status, action, row.name, row.id, detail]);
+    }
+  }
+
+  for (const [yearMonth, lines] of linesByMonth) {
+    const filePath = logPathFor(yearMonth);
+    const isNewFile = !fs.existsSync(filePath);
+    const out = (isNewFile ? [LOG_HEADER] : []).concat(lines);
+    fs.appendFileSync(filePath, out.join('\n') + '\n');
+  }
+}
 
 // One-off names to also approve in 加班單簽核 this run only, on top of the
 // persistent 白名單.md whitelist — for explicit per-turn user authorization
@@ -225,7 +336,25 @@ async function main() {
     result.queues.leave = q;
   }
 
+  // ---- 4. 異常簽核: check-only, no approval capability at all — this
+  // skill only ever reports what's pending here, never signs anything.
+  {
+    const label = '異常簽核';
+    console.log(`\n=== ${label} ===`);
+    const frame = await gotoQueue(page, label);
+    const parsed = await readQueueTable(frame);
+    const q = { pending: [], action: 'check_only' };
+    if (!parsed || parsed.dataRows.length === 0) {
+      console.log('empty queue');
+    } else {
+      q.pending = parsed.dataRows.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
+      console.log(`${parsed.dataRows.length} pending row(s):`, JSON.stringify(q.pending));
+    }
+    result.queues.abnormal = q;
+  }
+
   await browser.close();
+  appendLogRows(result);
   console.log('\nRESULT_JSON:' + JSON.stringify(result));
 }
 

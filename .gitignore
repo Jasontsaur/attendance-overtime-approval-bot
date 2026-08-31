@@ -12,6 +12,7 @@ playwright/localdeps/root/
 
 # Real coworker names/employee IDs — not for a shared repo.
 白名單.md
+logs/
 
 # Misc OS/editor cruft
 .DS_Store

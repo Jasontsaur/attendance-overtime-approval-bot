@@ -13,15 +13,22 @@ const LOCAL_TZ = 'Asia/Taipei';
 
 const QUEUE_LABEL = { 預定加班單簽核: '預定加班單簽核', 加班單簽核: '加班單簽核', 假單簽核: '假單簽核', 異常簽核: '異常簽核' };
 
-function parseCsvLine(line) {
-  const fields = [];
+// Parses a whole CSV file's text into records (each an array of fields),
+// respecting quoted fields that contain a literal newline (check-queues.js
+// quotes any field containing a comma/quote/newline — 異常簽核's detail
+// column regularly has embedded newlines, e.g. "20260903\n0800" from its
+// 員工補登出勤時間 field — so naively splitting the whole file on '\n' would
+// cut such a record in half).
+function parseCsvRecords(text) {
+  const records = [];
+  let fields = [];
   let cur = '';
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
     if (inQuotes) {
       if (c === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
+        if (text[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
       } else {
         cur += c;
       }
@@ -30,12 +37,19 @@ function parseCsvLine(line) {
     } else if (c === ',') {
       fields.push(cur);
       cur = '';
+    } else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      fields.push(cur);
+      cur = '';
+      if (fields.length > 1 || fields[0] !== '') records.push(fields);
+      fields = [];
     } else {
       cur += c;
     }
   }
   fields.push(cur);
-  return fields;
+  if (fields.length > 1 || fields[0] !== '') records.push(fields);
+  return records;
 }
 
 function readAllRows() {
@@ -48,9 +62,9 @@ function readAllRows() {
   const rows = [];
   for (const file of files) {
     const text = fs.readFileSync(path.join(LOG_DIR, file), 'utf8');
-    const lines = text.split('\n').filter(Boolean);
-    for (let i = 1; i < lines.length; i++) { // skip header
-      const [timestamp, queue, status, action, name, id, detail] = parseCsvLine(lines[i]);
+    const records = parseCsvRecords(text);
+    for (let i = 1; i < records.length; i++) { // skip header
+      const [timestamp, queue, status, action, name, id, detail] = records[i];
       if (!timestamp) continue;
       rows.push({ timestamp, queue, status, action, name, id, detail });
     }

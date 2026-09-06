@@ -2,7 +2,7 @@
 // Recognizes a small fixed set of Chinese command patterns. Anything else
 // falls through to 'unknown' with the help text.
 const HELP_TEXT = [
-  '可用指令：',
+  '可用指令（也可傳「？」查看這份說明）：',
   '• 檢查 — 立即檢查並依標準政策簽核三個佇列',
   '• 核准 姓名[,姓名2...] — 核准指定的人（假單/加班單皆會嘗試，只有真的待簽且比對到姓名才會生效）',
   '• 核准加班 姓名 — 只嘗試核准加班單',
@@ -20,7 +20,7 @@ function splitNames(s) {
 function parse(text) {
   const t = (text || '').trim();
 
-  if (/^\/(start|help)$/i.test(t) || /^(help|幫助|說明)$/.test(t)) {
+  if (/^\/(start|help)$/i.test(t) || /^(help|幫助|說明|\?|？)$/.test(t)) {
     return { intent: 'help' };
   }
   if (/^(檢查|check)(差勤)?$/i.test(t)) {

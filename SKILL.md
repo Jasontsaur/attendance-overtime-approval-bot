@@ -94,8 +94,9 @@ attendance-overtime-approval-bot skill...」），不能定時執行，也不能
 
 2. **如果 `RESULT_JSON` 裡出現 `"error":"SESSION_EXPIRED"`，或腳本直接
    拋出例外**：代表已存的登入 session（`playwright/auth/storage_state.json`）
-   失效了。處理方式見下方「Session refresh」——不要因為這個原因就退回用
-   滑鼠模擬；重新整理 session 通常比較快。
+   失效了。處理方式見下方「Session refresh」——先試方法 C（`auto-login.js`），
+   完全不需要使用者操作；不要因為這個原因就退回用滑鼠模擬；重新整理 session
+   通常比較快。
 
 3. **依標準政策回報給使用者**，內容取自 JSON：哪個佇列有幾筆待簽、哪些
    已經自動核准（姓名/工號/日期/時間/事由）、哪些還在等使用者明確授權
@@ -122,7 +123,19 @@ attendance-overtime-approval-bot skill...」），不能定時執行，也不能
 
 ## Session 重新整理（storage_state.json 失效時）
 
-依推薦順序，有兩種方式可以拿到新的 `playwright/auth/storage_state.json`：
+依推薦順序，有三種方式可以拿到新的 `playwright/auth/storage_state.json`：
+
+**C. 透過 `auto-login.js` 全自動登入**（最快，完全不需要使用者操作）——
+讀取 `playwright/.env`（`ATTENDANCE_EMP_ID` / `ATTENDANCE_PASSWORD`，已加入
+.gitignore，由使用者自己填入——Claude 不會打字輸入或詢問這兩個值）並無頭
+送出登入表單：
+```
+cd playwright && node auto-login.js
+```
+成功會印出 `登入狀態已儲存至 ...`。如果 `.env` 是空的/不存在
+（`LOGIN_FAILED: .env is missing ATTENDANCE_EMP_ID or ATTENDANCE_PASSWORD`）
+或登入被拒絕（密碼錯誤、帳號被鎖、頁面跟預期不符等任何原因），改用下面的
+方法 A 或 B——不要盲目重試，也不要要求使用者在對話裡把密碼講出來。
 
 **A. 從使用者已登入的 Edge 擷取 cookie**（快，不用打字輸入）——**但這個
 方式會從使用者的瀏覽器讀出真實的 session 憑證，要當成任何其他不可逆/

@@ -88,6 +88,12 @@ npx playwright install --with-deps chromium
    「Session refresh」段落）餵進去。比較快，但要當成任何「跟憑證沾邊」的
    捷徑一樣謹慎：只在你明確決定要做的時候才動手，不要當成背景/自動化步驟。
 
+3. **`node auto-login.js`** — 全自動、不需要人工操作：把
+   `playwright/.env.example` 複製成 `playwright/.env`（已加入 .gitignore）
+   填入 `ATTENDANCE_EMP_ID` / `ATTENDANCE_PASSWORD`，之後執行這個腳本會
+   自動填表送出登入。session 過期但沒人在電腦前時最適合用這個；`.env`
+   沒填或登入被拒會直接失敗印出訊息，不會重試或改用其他方式。
+
 ### 執行
 
 ```bash
@@ -113,10 +119,25 @@ EXTRA_APPROVE_NAMES="某某人,某某人2" node check-queues.js
 EXTRA_APPROVE_LEAVE_NAMES="某某人" node check-queues.js
 ```
 
+## 無人值守排程執行
+
+`playwright/scheduled-check.sh` 是設計給 cron / Windows Task Scheduler 這類
+排程機制呼叫的 wrapper：跑 `check-queues.js`，如果偵測到 session 過期或無法
+連線（`SESSION_EXPIRED` 或 `FATAL`），自動跑一次 `auto-login.js` 重新登入再
+retry 一次，全部輸出（含時間戳記）append 到 `playwright/logs/scheduled-run.log`。
+這代表 `.env` 必須先填好帳密（見上方），否則過期後只會重試失敗一次，不會
+主動用其他方式恢復。
+
+`playwright/watch-approvals.js` 讀 `scheduled-run.log`（例如 `tail -F` 接
+stdin），只在某次執行有代簽項目、有新的待確認項目、或執行失敗且沒有被自動
+恢復時才輸出一行摘要——大量「四個佇列都空」的排程執行不會產生任何輸出。
+
 ## 安全注意事項
 
 - `playwright/auth/storage_state.json` 含有真實的 session cookie，已加入
   .gitignore，請保持這樣。當成密碼一樣看待。
+- `playwright/.env` 含有明文登入密碼，已加入 .gitignore，請保持這樣；
+  `auto-login.js` 是本地端讀取，不應該讓 LLM/agent 讀取或詢問這個檔案的內容。
 - `白名單.md` 含有真實同事姓名/工號，已加入 .gitignore。把
   `白名單.md.example` 複製成 `白名單.md` 並填入真實資料——這個檔案本身
   不會被 git 追蹤。

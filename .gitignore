@@ -2,6 +2,9 @@
 # build-storage-state-from-cookie.js (see playwright/README section in main README).
 playwright/auth/
 
+# Login credentials for auto-login.js — never commit. Copy playwright/.env.example.
+playwright/.env
+
 # Regenerable npm deps
 playwright/node_modules/
 

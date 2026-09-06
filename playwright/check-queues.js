@@ -149,6 +149,15 @@ function loadExtraApproveLeaveNames() {
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+// Explicit per-run "approve everything currently pending" override for
+// 加班單簽核 and 假單簽核 (never 異常簽核 — that queue has no approval path
+// at all, by design, regardless of this flag). This bypasses the whitelist/
+// name-matching entirely for this one run; it is not a whitelist change.
+// Usage: APPROVE_ALL=1 node check-queues.js
+function isApproveAll() {
+  return process.env.APPROVE_ALL === '1';
+}
+
 function loadWhitelist() {
   const text = fs.readFileSync(WHITELIST_PATH, 'utf8');
   const names = [];
@@ -278,21 +287,23 @@ async function main() {
     } else {
       const whitelist = loadWhitelist();
       const extraApprove = loadExtraApproveNames();
+      const approveAll = isApproveAll();
       q.pending = parsed.dataRows.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
       console.log(`${parsed.dataRows.length} pending row(s):`, JSON.stringify(q.pending));
       if (extraApprove.length > 0) console.log('extra one-off approve names:', extraApprove);
-      const toApprove = parsed.dataRows.filter((r) => whitelist.includes(r.name) || extraApprove.includes(r.name));
-      const toLeave = parsed.dataRows.filter((r) => !whitelist.includes(r.name) && !extraApprove.includes(r.name));
+      if (approveAll) console.log('APPROVE_ALL override active — ignoring whitelist for this run');
+      const toApprove = approveAll ? parsed.dataRows : parsed.dataRows.filter((r) => whitelist.includes(r.name) || extraApprove.includes(r.name));
+      const toLeave = approveAll ? [] : parsed.dataRows.filter((r) => !whitelist.includes(r.name) && !extraApprove.includes(r.name));
       q.stillPending = toLeave.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
       if (toApprove.length > 0) {
         for (const row of toApprove) {
           await clickSignRadio(row.rowLocator);
         }
         const dialogMsg = await saveAndConfirm(frame, page);
-        q.action = 'whitelist_approved_subset';
+        q.action = approveAll ? 'approved_all_override' : 'whitelist_approved_subset';
         q.approved = toApprove.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
         q.dialogMessage = dialogMsg;
-        console.log('whitelist-approved:', JSON.stringify(q.approved));
+        console.log('approved:', JSON.stringify(q.approved));
       } else {
         q.action = 'none_matched_whitelist';
       }
@@ -315,21 +326,23 @@ async function main() {
       console.log('empty queue');
     } else {
       const extraApprove = loadExtraApproveLeaveNames();
+      const approveAll = isApproveAll();
       q.pending = parsed.dataRows.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
       console.log(`${parsed.dataRows.length} pending row(s):`, JSON.stringify(q.pending));
       if (extraApprove.length > 0) console.log('extra one-off approve names:', extraApprove);
-      const toApprove = parsed.dataRows.filter((r) => extraApprove.includes(r.name));
-      const toLeave = parsed.dataRows.filter((r) => !extraApprove.includes(r.name));
+      if (approveAll) console.log('APPROVE_ALL override active — approving every pending row');
+      const toApprove = approveAll ? parsed.dataRows : parsed.dataRows.filter((r) => extraApprove.includes(r.name));
+      const toLeave = approveAll ? [] : parsed.dataRows.filter((r) => !extraApprove.includes(r.name));
       q.stillPending = toLeave.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
       if (toApprove.length > 0) {
         for (const row of toApprove) {
           await clickSignRadio(row.rowLocator);
         }
         const dialogMsg = await saveAndConfirm(frame, page);
-        q.action = 'explicitly_approved_subset';
+        q.action = approveAll ? 'approved_all_override' : 'explicitly_approved_subset';
         q.approved = toApprove.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
         q.dialogMessage = dialogMsg;
-        console.log('explicitly approved:', JSON.stringify(q.approved));
+        console.log('approved:', JSON.stringify(q.approved));
       }
       console.log('still pending (check-only):', JSON.stringify(q.stillPending));
     }

@@ -40,6 +40,7 @@ scripts/                    從 WSL 透過 PowerShell 呼叫的 Windows 端輔�
   set-clipboard.sh              寫入 Windows 剪貼簿
   minimize-terminal.sh          截圖前先把終端機視窗縮到最小
 playwright/                 主要自動化程式（見下方）
+telegram-bot/                常駐 Telegram agent（見下方）
 ```
 
 ## `playwright/` 安裝設定
@@ -119,18 +120,45 @@ EXTRA_APPROVE_NAMES="某某人,某某人2" node check-queues.js
 EXTRA_APPROVE_LEAVE_NAMES="某某人" node check-queues.js
 ```
 
-## 無人值守排程執行
+不管姓名、忽略白名單，核准加班單/假單目前所有待簽項目（異常簽核仍不受
+影響，永遠不會被核准）：
 
-`playwright/scheduled-check.sh` 是設計給 cron / Windows Task Scheduler 這類
-排程機制呼叫的 wrapper：跑 `check-queues.js`，如果偵測到 session 過期或無法
-連線（`SESSION_EXPIRED` 或 `FATAL`），自動跑一次 `auto-login.js` 重新登入再
-retry 一次，全部輸出（含時間戳記）append 到 `playwright/logs/scheduled-run.log`。
-這代表 `.env` 必須先填好帳密（見上方），否則過期後只會重試失敗一次，不會
-主動用其他方式恢復。
+```bash
+APPROVE_ALL=1 node check-queues.js
+```
 
-`playwright/watch-approvals.js` 讀 `scheduled-run.log`（例如 `tail -F` 接
-stdin），只在某次執行有代簽項目、有新的待確認項目、或執行失敗且沒有被自動
-恢復時才輸出一行摘要——大量「四個佇列都空」的排程執行不會產生任何輸出。
+## `telegram-bot/` — 常駐 Telegram agent（主要介面）
+
+一個獨立、常駐的 Node process，透過 Telegram bot 跟你溝通，取代原本
+「排程檢查 + 在對話裡下指令」的組合。架構：
+
+```
+Telegram → Telegram Adapter → Agent Core (Planner + Memory + 差勤系統 Tools)
+```
+
+v1 的 Planner 是規則式的（沒有接 LLM），支援的指令見下方。所有標準政策邏輯
+（白名單、假單僅查看、異常簽核唯讀）都還在 `playwright/check-queues.js`
+裡，這個 bot 只是呼叫它、格式化結果，沒有重新實作核准邏輯。
+
+設定：
+
+```bash
+cd telegram-bot
+cp .env.example .env   # 填入 TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID（見 .env.example 內說明）
+node index.js           # 前景測試；正式使用建議透過 systemd/Task Scheduler 常駐（見 run.sh）
+```
+
+支援指令：`檢查`、`核准 姓名`、`核准加班 姓名`、`核准假單 姓名`、`全部核准`
+（忽略白名單，核准加班單/假單目前所有待簽項目，異常簽核仍不會被核准）、
+`狀態`、`保活`、`查詢本週`、`查詢本月`。
+
+內部排程（`scheduler.js`）在每日 06:00–20:00 每 2 小時自動檢查，並在跨夜
+空窗期做保活 ping；只有在有代簽/新待確認項目/失敗時才會主動推播到
+Telegram，避免每次「四個佇列都空」也發通知。
+
+`playwright/scheduled-check.sh` / `playwright/watch-approvals.js`（原本給
+cron / Windows Task Scheduler 用的 wrapper）仍保留在 repo 裡當作參考/備援，
+但預設用法已經是 `telegram-bot/`。
 
 ## 安全注意事項
 
@@ -138,6 +166,12 @@ stdin），只在某次執行有代簽項目、有新的待確認項目、或執
   .gitignore，請保持這樣。當成密碼一樣看待。
 - `playwright/.env` 含有明文登入密碼，已加入 .gitignore，請保持這樣；
   `auto-login.js` 是本地端讀取，不應該讓 LLM/agent 讀取或詢問這個檔案的內容。
+- `telegram-bot/.env` 含有 Telegram bot token，已加入 .gitignore。這個 bot
+  只回應 `.env` 裡設定的那個 chat id——因為它能實際核准 HR/薪資項目，務必
+  不要把授權 chat id 改成群組或分享給別人。
+- `全部核准` 指令/`APPROVE_ALL=1` 會忽略白名單，直接核准當下加班單/假單
+  佇列裡的所有待簽項目——這是刻意設計成需要每次手動下達的指令，不會被
+  排程自動觸發。
 - `白名單.md` 含有真實同事姓名/工號，已加入 .gitignore。把
   `白名單.md.example` 複製成 `白名單.md` 並填入真實資料——這個檔案本身
   不會被 git 追蹤。

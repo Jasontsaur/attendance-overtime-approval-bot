@@ -5,6 +5,13 @@ playwright/auth/
 # Login credentials for auto-login.js — never commit. Copy playwright/.env.example.
 playwright/.env
 
+# Telegram bot token + chat id — never commit. Copy telegram-bot/.env.example.
+telegram-bot/.env
+
+# Runtime state (last check result, notification dedup) — not for git.
+telegram-bot/state.json
+telegram-bot/logs/
+
 # Regenerable npm deps
 playwright/node_modules/
 

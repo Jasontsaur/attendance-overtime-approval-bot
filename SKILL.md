@@ -21,6 +21,14 @@ version: 2.0.0
 座標。只有在 Playwright 或已存的登入 session 無法使用時，才會退回用
 Windows 滑鼠模擬 + 瀏覽器 bookmarklet（見下方「備援流程」）。
 
+**獨立的 Telegram agent**（`telegram-bot/`，見 `README.md`）也存在，是一個
+常駐、獨立的 process，使用者直接在 Telegram 上跟它溝通——完全不經過
+Claude Code。它同樣呼叫 `check-queues.js`/`auto-login.js`/`keep-alive.js`
+完成所有實際動作，v1 的 Planner 是規則式的（沒有接 LLM），有自己的內部
+排程，取代舊的 Windows Task Scheduler 輪詢做法。這份 SKILL.md 描述的是
+「使用者透過 Claude Code 對話操作這套系統時」Claude 該怎麼做，不涉及
+Telegram bot 自己的執行邏輯。
+
 ## 套用到你自己的系統
 
 1. 把 `白名單.md.example` 複製成 `白名單.md`，填入真實姓名（已加入

@@ -120,8 +120,8 @@ EXTRA_APPROVE_NAMES="某某人,某某人2" node check-queues.js
 EXTRA_APPROVE_LEAVE_NAMES="某某人" node check-queues.js
 ```
 
-不管姓名、忽略白名單，核准加班單/假單目前所有待簽項目（異常簽核仍不受
-影響，永遠不會被核准）：
+不管姓名、忽略白名單，核准加班單/假單/異常簽核目前所有待簽項目（這三個
+佇列在這個模式下都是全有或全無，沒有部分核准的概念）：
 
 ```bash
 APPROVE_ALL=1 node check-queues.js
@@ -137,7 +137,7 @@ Telegram → Telegram Adapter → Agent Core (Planner + Memory + 差勤系統 To
 ```
 
 v1 的 Planner 是規則式的（沒有接 LLM），支援的指令見下方。所有標準政策邏輯
-（白名單、假單僅查看、異常簽核唯讀）都還在 `playwright/check-queues.js`
+（白名單、假單/異常簽核預設僅查看）都還在 `playwright/check-queues.js`
 裡，這個 bot 只是呼叫它、格式化結果，沒有重新實作核准邏輯。
 
 設定：
@@ -149,8 +149,8 @@ node index.js           # 前景測試；正式使用建議透過 systemd/Task S
 ```
 
 支援指令：`檢查`、`核准 姓名`、`核准加班 姓名`、`核准假單 姓名`、`全部核准`
-（忽略白名單，核准加班單/假單目前所有待簽項目，異常簽核仍不會被核准）、
-`狀態`、`保活`、`查詢本週`、`查詢本月`。
+（忽略白名單，核准加班單/假單/異常簽核目前所有待簽項目）、`狀態`、`保活`、
+`查詢本週`、`查詢本月`。
 
 內部排程（`scheduler.js`）在每日 06:00–20:00 每 2 小時自動檢查，並在跨夜
 空窗期做保活 ping；只有在有代簽/新待確認項目/失敗時才會主動推播到
@@ -169,9 +169,9 @@ cron / Windows Task Scheduler 用的 wrapper）仍保留在 repo 裡當作參考
 - `telegram-bot/.env` 含有 Telegram bot token，已加入 .gitignore。這個 bot
   只回應 `.env` 裡設定的那個 chat id——因為它能實際核准 HR/薪資項目，務必
   不要把授權 chat id 改成群組或分享給別人。
-- `全部核准` 指令/`APPROVE_ALL=1` 會忽略白名單，直接核准當下加班單/假單
-  佇列裡的所有待簽項目——這是刻意設計成需要每次手動下達的指令，不會被
-  排程自動觸發。
+- `全部核准` 指令/`APPROVE_ALL=1` 會忽略白名單，直接核准當下加班單/假單/
+  異常簽核佇列裡的所有待簽項目——這是刻意設計成需要每次手動下達的指令，
+  不會被排程自動觸發。
 - `白名單.md` 含有真實同事姓名/工號，已加入 .gitignore。把
   `白名單.md.example` 複製成 `白名單.md` 並填入真實資料——這個檔案本身
   不會被 git 追蹤。

@@ -112,12 +112,11 @@ function appendLogRows(result) {
     }
     const approvedKeys = new Set((q.approved || []).map(approvedKeyOf));
     for (const row of pending) {
-      let status;
-      if (q.action === 'check_only' && !q.approved) {
-        status = 'reported'; // 異常簽核: report-only, no approve/pending split at all
-      } else {
-        status = approvedKeys.has(approvedKeyOf(row)) ? 'approved' : 'still_pending';
-      }
+      // Every queue's `approved` array is always present (possibly empty),
+      // so this naturally comes out as 'still_pending' for anything not
+      // actually approved this run — including 異常簽核 on a normal
+      // (non-APPROVE_ALL) run, since that queue can now be approved too.
+      const status = approvedKeys.has(approvedKeyOf(row)) ? 'approved' : 'still_pending';
       const eventYearMonth = extractEventYearMonth(queueKey, row.detail || [], runYearMonth);
       const detail = (row.detail || []).join(' | ');
       pushLine(eventYearMonth, [result.timestamp, label, status, action, row.name, row.id, detail]);
@@ -150,9 +149,10 @@ function loadExtraApproveLeaveNames() {
 }
 
 // Explicit per-run "approve everything currently pending" override for
-// 加班單簽核 and 假單簽核 (never 異常簽核 — that queue has no approval path
-// at all, by design, regardless of this flag). This bypasses the whitelist/
-// name-matching entirely for this one run; it is not a whitelist change.
+// 加班單簽核 / 假單簽核 / 異常簽核. This bypasses the whitelist/name-matching
+// entirely for this one run; it is not a whitelist change, and there is no
+// partial-approval mode for this flag — every pending row in each of these
+// three queues gets approved when it's set.
 // Usage: APPROVE_ALL=1 node check-queues.js
 function isApproveAll() {
   return process.env.APPROVE_ALL === '1';
@@ -205,20 +205,67 @@ async function readQueueTable(frame) {
   return null;
 }
 
+// 異常簽核's table is structurally different from the other three queues:
+// there's no separate 姓名 column — 工號 holds "工號 姓名" combined (e.g.
+// "010722 林群洲") — so readQueueTable() (which requires distinct 姓名+工號
+// headers) never matches it and this needs its own parser. Confirmed via a
+// live probe of this one specific system's page — re-verify against your
+// own system's layout.
+async function readAbnormalQueueTable(frame) {
+  const tables = frame.locator('table');
+  const tableCount = await tables.count();
+  for (let ti = 0; ti < tableCount; ti++) {
+    const table = tables.nth(ti);
+    const headerRow = table.locator('tr').first();
+    const headerCells = await headerRow.locator('td,th').allInnerTexts();
+    const trimmed = headerCells.map((h) => h.trim());
+    if (trimmed.includes('工號') && trimmed.includes('異常名稱')) {
+      const idIdx = trimmed.indexOf('工號');
+      const rows = table.locator('tr');
+      const rowCount = await rows.count();
+      const dataRows = [];
+      for (let ri = 1; ri < rowCount; ri++) {
+        const rowLocator = rows.nth(ri);
+        const cells = rowLocator.locator('td');
+        const cellCount = await cells.count();
+        if (cellCount <= idIdx) continue;
+        const texts = (await cells.allInnerTexts()).map((t) => t.trim());
+        const m = (texts[idIdx] || '').match(/^(\S+)\s+(.*)$/);
+        dataRows.push({
+          rowLocator,
+          texts,
+          id: m ? m[1] : (texts[idIdx] || ''),
+          name: m ? m[2].trim() : '',
+        });
+      }
+      return { table, headerCells: trimmed, dataRows };
+    }
+  }
+  return null;
+}
+
 async function clickSignRadio(rowLocator) {
   // Column 0 is 簽核 (approve), column 1 is 駁回 (reject) — both unlabeled
   // radio columns to the left of 姓名/工號. Confirmed via probe2.js.
   await rowLocator.locator('td').nth(0).locator('input[type=radio]').check();
 }
 
-async function saveAndConfirm(frame, page) {
+// 異常簽核 uses a checkbox (not a 簽核/駁回 radio pair — there is no reject
+// option for this queue at all) in the first column.
+async function clickCheckbox(rowLocator) {
+  await rowLocator.locator('td').first().locator('input[type=checkbox]').check();
+}
+
+// buttonText defaults to '存檔' (the other three queues); 異常簽核's submit
+// button is itself labeled '簽核' instead.
+async function saveAndConfirm(frame, page, buttonText = '存檔') {
   let dialogMessage = null;
   const dialogHandler = async (dialog) => {
     dialogMessage = dialog.message();
     await dialog.accept();
   };
   page.on('dialog', dialogHandler);
-  const saveButton = frame.locator('input[type=button], input[type=submit], button').filter({ hasText: '存檔' });
+  const saveButton = frame.locator('input[type=button], input[type=submit], button').filter({ hasText: buttonText });
   await saveButton.first().click();
   await page.waitForTimeout(1500); // let the confirm() fire and the save complete
   page.off('dialog', dialogHandler);
@@ -349,19 +396,35 @@ async function main() {
     result.queues.leave = q;
   }
 
-  // ---- 4. 異常簽核: check-only, no approval capability at all — this
-  // skill only ever reports what's pending here, never signs anything.
+  // ---- 4. 異常簽核: check-only by default — no whitelist, no per-name
+  // override, ever. The ONLY way anything here gets approved is the
+  // explicit, per-run APPROVE_ALL=1 override (this queue has no partial-
+  // approval concept, it's all-or-nothing same as the other two queues
+  // under that flag). Note this queue's table is structurally different
+  // (checkboxes not radios, submit button is itself labeled 簽核, no reject
+  // option, no separate 姓名 column) — see readAbnormalQueueTable().
   {
     const label = '異常簽核';
     console.log(`\n=== ${label} ===`);
     const frame = await gotoQueue(page, label);
-    const parsed = await readQueueTable(frame);
-    const q = { pending: [], action: 'check_only' };
+    const parsed = await readAbnormalQueueTable(frame);
+    const q = { pending: [], approved: [], action: 'check_only' };
     if (!parsed || parsed.dataRows.length === 0) {
       console.log('empty queue');
     } else {
       q.pending = parsed.dataRows.map((r) => ({ name: r.name, id: r.id, detail: r.texts }));
       console.log(`${parsed.dataRows.length} pending row(s):`, JSON.stringify(q.pending));
+      if (isApproveAll()) {
+        console.log('APPROVE_ALL override active — approving every pending row');
+        for (const row of parsed.dataRows) {
+          await clickCheckbox(row.rowLocator);
+        }
+        const dialogMsg = await saveAndConfirm(frame, page, '簽核');
+        q.action = 'approved_all_override';
+        q.approved = q.pending;
+        q.dialogMessage = dialogMsg;
+        console.log('approved:', JSON.stringify(q.approved));
+      }
     }
     result.queues.abnormal = q;
   }

@@ -50,9 +50,8 @@ async function checkQueues(extraEnv = {}) {
   return result || { error: 'PARSE_FAILED', message: stdout.slice(-2000) };
 }
 
-// Approves every pending row in 加班單/假單簽核 for this run, regardless of
-// whitelist (see check-queues.js's APPROVE_ALL). 異常簽核 is never touched —
-// it has no approval path at all, by design.
+// Approves every pending row in 加班單/假單/異常簽核 for this run, regardless
+// of whitelist (see check-queues.js's APPROVE_ALL).
 async function approveAll() {
   return checkQueues({ APPROVE_ALL: '1' });
 }

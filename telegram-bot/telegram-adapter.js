@@ -10,11 +10,13 @@ class TelegramAdapter {
     this.offset = 0;
   }
 
-  async sendMessage(chatId, text) {
+  async sendMessage(chatId, text, replyMarkup) {
+    const body = { chat_id: chatId, text };
+    if (replyMarkup) body.reply_markup = replyMarkup;
     const res = await fetch(`${this.base}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       console.error('sendMessage failed:', res.status, await res.text().catch(() => ''));
@@ -22,9 +24,9 @@ class TelegramAdapter {
   }
 
   // Sends to the one authorized chat — used for proactive/scheduled pushes.
-  async notify(text) {
+  async notify(text, replyMarkup) {
     if (!this.allowedChatId) return;
-    await this.sendMessage(this.allowedChatId, text);
+    await this.sendMessage(this.allowedChatId, text, replyMarkup);
   }
 
   // Long-polls for updates and invokes onMessage(text, chatId) for each

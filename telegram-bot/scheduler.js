@@ -21,24 +21,32 @@ function start(adapter) {
     if (hm === lastFiredMinute) return; // already handled this minute
     lastFiredMinute = hm;
 
-    if (CHECK_TIMES.includes(hm)) {
-      console.log(`[scheduler] running scheduled check @ ${hm}`);
-      const state = memory.load();
-      const result = await tools.checkQueues();
-      state.lastCheck = result;
-      const lines = agentCore.buildNotifyLines(result, state);
-      memory.save(state);
-      if (lines.length) {
-        await adapter.notify(lines.join('\n'));
+    // Nothing here awaits back into the caller (setInterval doesn't await
+    // its callback), so an uncaught rejection would otherwise be unhandled
+    // and — depending on Node's config — able to bring the whole process
+    // down. Keep this tick isolated from the next one.
+    try {
+      if (CHECK_TIMES.includes(hm)) {
+        console.log(`[scheduler] running scheduled check @ ${hm}`);
+        const state = memory.load();
+        const result = await tools.checkQueues();
+        state.lastCheck = result;
+        const lines = agentCore.buildNotifyLines(result, state);
+        memory.save(state);
+        if (lines.length) {
+          await adapter.notify(lines.join('\n'), agentCore.KEYBOARD_MARKUP);
+        }
+      } else if (KEEPALIVE_TIMES.includes(hm)) {
+        console.log(`[scheduler] running overnight keep-alive @ ${hm}`);
+        const status = await tools.keepAlive();
+        // Don't push to Telegram overnight even on EXPIRED — matches the
+        // original keep-alive.js policy of not disturbing the user at night.
+        // The next scheduled check (06:00) will attempt real session
+        // recovery and report normally if something's wrong.
+        console.log(`[scheduler] keep-alive result: ${status}`);
       }
-    } else if (KEEPALIVE_TIMES.includes(hm)) {
-      console.log(`[scheduler] running overnight keep-alive @ ${hm}`);
-      const status = await tools.keepAlive();
-      // Don't push to Telegram overnight even on EXPIRED — matches the
-      // original keep-alive.js policy of not disturbing the user at night.
-      // The next scheduled check (06:00) will attempt real session recovery
-      // and report normally if something's wrong.
-      console.log(`[scheduler] keep-alive result: ${status}`);
+    } catch (e) {
+      console.error(`[scheduler] tick @ ${hm} failed:`, e);
     }
   }, 60 * 1000);
 }

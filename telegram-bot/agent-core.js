@@ -111,4 +111,4 @@ async function handleMessage(text) {
   }
 }
 
-module.exports = { handleMessage, buildFullReport, buildNotifyLines };
+module.exports = { handleMessage, buildFullReport, buildNotifyLines, KEYBOARD_MARKUP: planner.KEYBOARD_MARKUP };

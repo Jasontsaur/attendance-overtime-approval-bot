@@ -13,6 +13,21 @@ const HELP_TEXT = [
   '• 查詢本週 / 查詢本月 — 從本機紀錄查詢簽核紀錄',
 ].join('\n');
 
+// Persistent Reply Keyboard shown under the chat's text box (Telegram's
+// equivalent of a LINE rich menu) — tapping a button just sends its label as
+// a normal text message, so these map straight onto parse() below with no
+// extra glue code. Deliberately excludes 全部核准: it bypasses the
+// whitelist and is meant to require actually typing it out, not a single
+// accidental tap.
+const KEYBOARD_MARKUP = {
+  keyboard: [
+    ['檢查', '狀態'],
+    ['查詢本週', '查詢本月'],
+    ['保活', '說明'],
+  ],
+  resize_keyboard: true,
+};
+
 function splitNames(s) {
   return s.split(/[,，、\s]+/).map((n) => n.trim()).filter(Boolean);
 }
@@ -54,4 +69,4 @@ function parse(text) {
   return { intent: 'unknown' };
 }
 
-module.exports = { parse, HELP_TEXT };
+module.exports = { parse, HELP_TEXT, KEYBOARD_MARKUP };

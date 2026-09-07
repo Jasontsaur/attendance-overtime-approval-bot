@@ -45,7 +45,7 @@ async function main() {
       await adapter.poll(async (text, chatId) => {
         console.log(`[recv] ${text}`);
         const reply = await agentCore.handleMessage(text);
-        await adapter.sendMessage(chatId, reply);
+        await adapter.sendMessage(chatId, reply, agentCore.KEYBOARD_MARKUP);
       });
     } catch (e) {
       console.error('poll loop error:', e);

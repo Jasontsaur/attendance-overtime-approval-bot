@@ -97,30 +97,62 @@ function inRange(rowDate, range) {
   return diff >= 0 && diff <= daysSinceMonday;
 }
 
+// A still-pending (or reported) request gets re-logged on every check run
+// that observes it still open — the same underlying request can appear
+// dozens of times across a week. Pull a short M/D label out of the raw
+// detail string so entries stay distinguishable after collapsing repeats.
+function extractDateLabel(detail) {
+  for (const t of String(detail || '').split('|').map((s) => s.trim())) {
+    if (/^\d{8}$/.test(t)) return `${+t.slice(4, 6)}/${+t.slice(6, 8)}`;
+    if (/^\d{7}$/.test(t)) return `${+t.slice(3, 5)}/${+t.slice(5, 7)}`;
+  }
+  return '';
+}
+
+const STATUS_LABEL = { approved: '', still_pending: '待確認', reported: '僅回報' };
+// Once a request is approved it never gets logged as still_pending/reported
+// again, so when the same (queue,name,id,detail) key shows up under more
+// than one status across the range, 'approved' is simply the later, final
+// state — prefer it so each real request appears exactly once.
+const STATUS_RANK = { approved: 2, reported: 1, still_pending: 1 };
+
 function query(range) {
   const rows = readAllRows().filter((r) => r.status !== 'empty' && inRange(taipeiDate(r.timestamp), range));
   const label = range === 'month' ? '本月' : '本週';
   if (rows.length === 0) return `${label}沒有任何簽核紀錄。`;
 
+  // Collapse to one entry per distinct (queue, name, id, detail) — this is
+  // what turns "checked 5 times while still pending, then approved" into a
+  // single "approved" line instead of 5 pending repeats plus 1 approved one.
   const byQueue = {};
   for (const r of rows) {
-    byQueue[r.queue] = byQueue[r.queue] || { approved: 0, still_pending: 0, reported: 0, names: [] };
-    const bucket = byQueue[r.queue];
-    if (r.status === 'approved') bucket.approved++;
-    else if (r.status === 'still_pending') bucket.still_pending++;
-    else if (r.status === 'reported') bucket.reported++;
-    if (r.name) bucket.names.push(`${r.name}${r.status === 'approved' ? '' : `(${r.status})`}`);
+    const requests = (byQueue[r.queue] = byQueue[r.queue] || new Map());
+    const key = `${r.name}|${r.id}|${r.detail}`;
+    const existing = requests.get(key);
+    if (!existing || STATUS_RANK[r.status] > STATUS_RANK[existing.status]) {
+      requests.set(key, r);
+    }
   }
 
-  const lines = [`${label}簽核紀錄（共 ${rows.length} 筆）：`];
-  for (const [queue, b] of Object.entries(byQueue)) {
-    const parts = [];
-    if (b.approved) parts.push(`已核准 ${b.approved}`);
-    if (b.still_pending) parts.push(`待確認 ${b.still_pending}`);
-    if (b.reported) parts.push(`僅回報 ${b.reported}`);
-    lines.push(`${queue}：${parts.join('、')}\n  ${b.names.join('、')}`);
+  let totalUnique = 0;
+  const lines = [];
+  for (const [queue, requests] of Object.entries(byQueue)) {
+    const counts = { approved: 0, still_pending: 0, reported: 0 };
+    const entries = [];
+    for (const r of requests.values()) {
+      counts[r.status] = (counts[r.status] || 0) + 1;
+      const dateLabel = extractDateLabel(r.detail);
+      const suffix = STATUS_LABEL[r.status] ? `(${STATUS_LABEL[r.status]})` : '';
+      entries.push(`${r.name}${dateLabel ? ' ' + dateLabel : ''}${suffix}`);
+    }
+    const countParts = [];
+    if (counts.approved) countParts.push(`已核准 ${counts.approved}`);
+    if (counts.still_pending) countParts.push(`待確認 ${counts.still_pending}`);
+    if (counts.reported) countParts.push(`僅回報 ${counts.reported}`);
+    totalUnique += requests.size;
+    lines.push(`${queue}：${countParts.join('、')}\n  ${entries.join('、')}`);
   }
-  return lines.join('\n');
+  return `${label}簽核紀錄（共 ${totalUnique} 筆）：\n` + lines.join('\n');
 }
 
 module.exports = { query };

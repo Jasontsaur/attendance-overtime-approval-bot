@@ -101,12 +101,16 @@ function inRange(rowDate, range) {
 // that observes it still open — the same underlying request can appear
 // dozens of times across a week. Pull a short M/D label out of the raw
 // detail string so entries stay distinguishable after collapsing repeats.
+// Returns { label: "M/D", sortKey: MMDD } or null.
 function extractDateLabel(detail) {
   for (const t of String(detail || '').split('|').map((s) => s.trim())) {
-    if (/^\d{8}$/.test(t)) return `${+t.slice(4, 6)}/${+t.slice(6, 8)}`;
-    if (/^\d{7}$/.test(t)) return `${+t.slice(3, 5)}/${+t.slice(5, 7)}`;
+    let m, d;
+    if (/^\d{8}$/.test(t)) { m = +t.slice(4, 6); d = +t.slice(6, 8); }
+    else if (/^\d{7}$/.test(t)) { m = +t.slice(3, 5); d = +t.slice(5, 7); }
+    else continue;
+    return { label: `${m}/${d}`, sortKey: m * 100 + d };
   }
-  return '';
+  return null;
 }
 
 const STATUS_LABEL = { approved: '', still_pending: '待確認', reported: '僅回報' };
@@ -134,23 +138,40 @@ function query(range) {
     }
   }
 
+  // Within one status, group by name and collect that person's dates onto
+  // one entry — "李蘇倫(9/7、9/8、9/9)" instead of repeating the name once
+  // per date.
+  function formatGroup(requests, status) {
+    const byName = new Map();
+    for (const r of requests.values()) {
+      if (r.status !== status) continue;
+      const date = extractDateLabel(r.detail);
+      if (!byName.has(r.name)) byName.set(r.name, []);
+      if (date) byName.get(r.name).push(date);
+    }
+    return [...byName.entries()]
+      .map(([name, dates]) => {
+        dates.sort((a, b) => a.sortKey - b.sortKey);
+        return dates.length ? `${name}(${dates.map((d) => d.label).join('、')})` : name;
+      })
+      .join('、');
+  }
+
   let totalUnique = 0;
   const lines = [];
   for (const [queue, requests] of Object.entries(byQueue)) {
     const counts = { approved: 0, still_pending: 0, reported: 0 };
-    const entries = [];
-    for (const r of requests.values()) {
-      counts[r.status] = (counts[r.status] || 0) + 1;
-      const dateLabel = extractDateLabel(r.detail);
-      const suffix = STATUS_LABEL[r.status] ? `(${STATUS_LABEL[r.status]})` : '';
-      entries.push(`${r.name}${dateLabel ? ' ' + dateLabel : ''}${suffix}`);
-    }
+    for (const r of requests.values()) counts[r.status] = (counts[r.status] || 0) + 1;
+
     const countParts = [];
-    if (counts.approved) countParts.push(`已核准 ${counts.approved}`);
-    if (counts.still_pending) countParts.push(`待確認 ${counts.still_pending}`);
-    if (counts.reported) countParts.push(`僅回報 ${counts.reported}`);
+    const detailLines = [];
+    for (const status of ['approved', 'still_pending', 'reported']) {
+      if (!counts[status]) continue;
+      countParts.push(`${status === 'approved' ? '已核准' : STATUS_LABEL[status]} ${counts[status]}`);
+      detailLines.push(`  ${status === 'approved' ? '已核准' : STATUS_LABEL[status]}：${formatGroup(requests, status)}`);
+    }
     totalUnique += requests.size;
-    lines.push(`${queue}：${countParts.join('、')}\n  ${entries.join('、')}`);
+    lines.push(`${queue}：${countParts.join('、')}\n` + detailLines.join('\n'));
   }
   return `${label}簽核紀錄（共 ${totalUnique} 筆）：\n` + lines.join('\n');
 }

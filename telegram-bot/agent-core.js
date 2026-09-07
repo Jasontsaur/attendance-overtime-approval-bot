@@ -6,7 +6,7 @@ const planner = require('./planner');
 const tools = require('./tools');
 const memory = require('./memory');
 const records = require('./records');
-const { localTime, describeRow, describeRows } = require('./format');
+const { localTime, describeGroupedRows } = require('./format');
 
 const QUEUE_ORDER = ['pre_overtime', 'overtime', 'leave', 'abnormal'];
 const QUEUE_LABEL = { pre_overtime: '預定加班單簽核', overtime: '加班單簽核', leave: '假單簽核', abnormal: '異常簽核' };
@@ -26,8 +26,8 @@ function buildFullReport(result) {
       continue;
     }
     const parts = [];
-    if (approved.length) parts.push(`已核准 ${approved.length} 筆：${describeRows(key, approved).join('、')}`);
-    if (stillPending.length) parts.push(`待確認 ${stillPending.length} 筆：${describeRows(key, stillPending).join('、')}`);
+    if (approved.length) parts.push(`已核准 ${approved.length} 筆：${describeGroupedRows(key, approved)}`);
+    if (stillPending.length) parts.push(`待確認 ${stillPending.length} 筆：${describeGroupedRows(key, stillPending)}`);
     lines.push(`${QUEUE_LABEL[key]}：${parts.join('；')}`);
   }
   return lines.join('\n');
@@ -44,13 +44,13 @@ function buildNotifyLines(result, state) {
     const q = result.queues[key] || {};
     const approved = q.approved || [];
     if (approved.length) {
-      out.push(`已代簽 ${QUEUE_LABEL[key]} ${approved.length} 筆：${describeRows(key, approved).join('、')}`);
+      out.push(`已代簽 ${QUEUE_LABEL[key]} ${approved.length} 筆：${describeGroupedRows(key, approved)}`);
     }
     const stillPending = q.stillPending !== undefined ? q.stillPending : (q.action === 'check_only' ? (q.pending || []) : []);
     const fresh = stillPending.filter((r) => !state.notified.includes(memory.rowSignature(key, r)));
     if (fresh.length) {
       fresh.forEach((r) => state.notified.push(memory.rowSignature(key, r)));
-      out.push(`待你確認 ${QUEUE_LABEL[key]} ${fresh.length} 筆：${describeRows(key, fresh).join('、')}`);
+      out.push(`待你確認 ${QUEUE_LABEL[key]} ${fresh.length} 筆：${describeGroupedRows(key, fresh)}`);
     }
   }
   return out;

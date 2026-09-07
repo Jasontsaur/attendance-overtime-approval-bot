@@ -46,4 +46,25 @@ function describeRows(queueKey, rows) {
   return rows.map((r) => describeRow(queueKey, r));
 }
 
-module.exports = { LAYOUT, localTime, describeRow, describeRows };
+// Same info as describeRows, but grouped by name (no 工號, and one person's
+// multiple rows collapse onto a single entry) — e.g. "洪瑞菁(9/7 18:00–23:00、
+// 9/8 18:00–23:00)" instead of repeating "洪瑞菁(006882)" once per row.
+function describeGroupedRows(queueKey, rows) {
+  const { fmt } = LAYOUT[queueKey];
+  const byName = new Map();
+  for (const r of rows) {
+    let detail = '';
+    try {
+      detail = fmt(r.detail) || '';
+    } catch {
+      detail = '';
+    }
+    if (!byName.has(r.name)) byName.set(r.name, []);
+    if (detail) byName.get(r.name).push(detail);
+  }
+  return [...byName.entries()]
+    .map(([name, frags]) => (frags.length ? `${name}(${frags.join('、')})` : name))
+    .join('、');
+}
+
+module.exports = { LAYOUT, localTime, describeRow, describeRows, describeGroupedRows };

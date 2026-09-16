@@ -16,12 +16,14 @@ const HELP_TEXT = [
 // Persistent Reply Keyboard shown under the chat's text box (Telegram's
 // equivalent of a LINE rich menu) — tapping a button just sends its label as
 // a normal text message, so these map straight onto parse() below with no
-// extra glue code. Deliberately excludes 全部核准: it bypasses the
-// whitelist and is meant to require actually typing it out, not a single
-// accidental tap.
+// extra glue code. 全部核准 sits on the keyboard at the user's explicit
+// request (2026-09-16) even though it bypasses the whitelist — it used to be
+// deliberately excluded to avoid a one-tap mistake, so don't "restore" that
+// without asking. 狀態 lost its button in the swap but is still a valid
+// typed command.
 const KEYBOARD_MARKUP = {
   keyboard: [
-    ['檢查', '狀態'],
+    ['檢查', '全部核准'],
     ['查詢本週', '查詢本月'],
     ['保活', '說明'],
   ],

@@ -12,4 +12,5 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
 mkdir -p logs
+echo "$$" > logs/bot.pid  # exec below preserves this PID — watchdog.sh checks it
 exec node index.js >> logs/bot.log 2>&1
